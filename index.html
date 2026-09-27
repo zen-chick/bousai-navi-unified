@@ -491,6 +491,11 @@
     <div id="rainGuide"></div>
   </div>
 
+  <div class="card" id="kagoshimaRainCard" hidden>
+    <h2>鹿児島市の降水量</h2>
+    <div id="kagoshimaRain"></div>
+  </div>
+
 </section>
 
 <!-- ======================= 土砂・火山 ======================= -->
@@ -581,6 +586,11 @@
       <button class="btn btn-gray btn-sm" id="exportSpotsBtn">書き出し</button>
     </div>
     <p class="sub" style="margin:10px 0 0">Googleマップの「保存済み」はアプリから読めないため、ここに登録した分がこのアプリのスター付きになります。Googleマップで共有したリンクを貼ると座標を取り込めます。</p>
+  </div>
+
+  <div class="card" id="kagoshimaShelterCard" hidden>
+    <h2>鹿児島市の避難施設</h2>
+    <div id="kagoshimaShelters"></div>
   </div>
 
   <div class="card">
@@ -934,6 +944,7 @@ const State = {
   souvenirs: store.get('souvenirs', []),
   images: store.get('imageIds', []),       // [{id, name, savedAt}] — 画像本体は ImageDB(IndexedDB) に格納
   snapshots: store.get('snapshots', []),   // [{ id, name, pref, lat, lon, regionCode, savedAt, now }]
+  kagoshima: null,
   mapView: 'place', routeMode: 'driving', selectedSpot: null,
   hazardMode: 'disaster', hazardOn: Object.fromEntries(CFG.hazard.map(h => [h.id, h.on])),
   offline: false
@@ -949,6 +960,12 @@ async function loadMasterData() {
   ]);
   State.regions = reg.regions || [];
   State.volcanoes = vol.volcanoes || [];
+  const [rain, places, transit] = await Promise.all([
+    fetch('./data/kagoshima/rain.json').then(r => r.ok ? r.json() : null).catch(() => null),
+    fetch('./data/kagoshima/places.json').then(r => r.ok ? r.json() : null).catch(() => null),
+    fetch('./data/kagoshima/transit.json').then(r => r.ok ? r.json() : null).catch(() => null)
+  ]);
+  State.kagoshima = { rain, places, transit };
 }
 
 function nearestRegion(lat, lon) {
@@ -1268,7 +1285,7 @@ function renderAll() {
   renderLocation(); renderStatus(); renderWeather(); renderWarnings(); renderTransit();
   renderRainSummary(); renderRiskHome(); renderVolcanoCard();
   renderSouvenirs(); renderSpots();
-  renderRainPane(); renderDosha(); renderStatics(); renderMapTab(); renderImages();
+  renderRainPane(); renderKagoshimaExtras(); renderDosha(); renderStatics(); renderMapTab(); renderImages();
 }
 
 function renderLocation() {
@@ -1353,6 +1370,14 @@ function renderWarnings() {
 
 function renderTransit() {
   const el = $('#transitList');
+  const local = isKagoshimaCity() ? State.kagoshima?.transit : null;
+  if (local?.operators?.length) {
+    el.innerHTML = local.operators.map(item => `<div class="op">
+      <div class="nm"><b>${esc(item.name)}</b><span>${esc(item.note || item.kind || '公式情報を確認')}</span></div>
+      ${item.url ? `<a class="icon-btn" href="${esc(item.url)}" target="_blank" rel="noopener">開く</a>` : ''}
+    </div>`).join('');
+    return;
+  }
   const pref = State.here?.pref;
   const jr = pref ? CFG.jrByPref[pref] : null;
   const rows = [];
@@ -1460,6 +1485,35 @@ function renderRainPane() {
       <div class="stat"><div class="k">24時間</div><div class="v num">${num(a.rain24h)}<small>mm</small></div></div>
     </div>
     <p class="sub" style="margin:10px 0 0">${State.now?.station?.name ? 'アメダス' + esc(State.now.station.name) : '最寄り観測点'} ${jstShort(a.time)} 観測。</p>`;
+}
+
+function isKagoshimaCity() {
+  const here = State.here;
+  return !!here && haversine(here.lat, here.lon, 31.5966, 130.5571) <= 35;
+}
+
+function renderKagoshimaExtras() {
+  const enabled = isKagoshimaCity();
+  const sheltersCard = $('#kagoshimaShelterCard');
+  const rainCard = $('#kagoshimaRainCard');
+  sheltersCard.hidden = !enabled;
+  rainCard.hidden = !enabled;
+  if (!enabled) return;
+
+  const shelters = State.kagoshima?.places?.shelters || [];
+  $('#kagoshimaShelters').innerHTML = shelters.length
+    ? shelters.map(s => `<div class="op"><div class="nm"><b>${esc(s.name)}</b><span>${esc(s.addr || '')}${s.kind ? ' ・ ' + esc(s.kind) : ''}</span></div><a class="icon-btn" href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(s.lat + ',' + s.lng)}" target="_blank" rel="noopener">地図</a></div>`).join('')
+    : '<div class="empty">避難施設データを読み込めませんでした</div>';
+
+  const rain = State.kagoshima?.rain;
+  const monthly = rain?.normal?.monthly || [];
+  const sums = rain?.sum || {};
+  const month = new Date().getMonth();
+  const rows = [['今日', sums.today], ['過去30日', sums.d30], ['過去90日', sums.d90], ['今月の平年値', monthly[month]]]
+    .filter(([, value]) => value != null);
+  $('#kagoshimaRain').innerHTML = rows.length
+    ? `<div class="grid2">${rows.map(([label, value]) => `<div class="stat"><div class="k">${label}</div><div class="v num">${num(value)}<small>mm</small></div></div>`).join('')}</div><p class="sub" style="margin:10px 0 0">鹿児島市向けの保存データです。観測時刻はデータ更新日をご確認ください。</p>`
+    : '<div class="empty">降水履歴データを読み込めませんでした</div>';
 }
 
 /* ---------- 土砂・火山 ---------- */
