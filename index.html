@@ -1295,7 +1295,11 @@ function renderLocation() {
     nowLoc.innerHTML = `<div class="empty">位置が未設定です。「変更」から現在地を取得するか、行き先を選んでください。</div>`;
     return;
   }
-  const SRC = { gps: ['現在地', 'src-pill gps'], manual: ['選択した行き先', 'src-pill'], saved: ['保存データ（オフライン）', 'src-pill alert'] };
+  const SRC = {
+    gps: ['現在地', 'src-pill gps'],
+    manual: ['選択した行き先', 'src-pill'],
+    saved: State.offline ? ['保存データ（オフライン）', 'src-pill alert'] : ['保存した地点', 'src-pill']
+  };
   const [srcLabel, srcCls] = SRC[h.source] || SRC.manual;
   nowLoc.innerHTML = `
     <span class="pin">📍</span>
@@ -1308,6 +1312,14 @@ function renderLocation() {
 
 function renderStatus() {
   const n = State.now;
+  if (!n) {
+    $('#band').dataset.lv = 'none';
+    $('#bandIco').textContent = '❓';
+    $('#bandTitle').textContent = '防災データを表示できません';
+    $('#bandSub').textContent = '通信状態を確認し、データを更新してください';
+    $('#offlineBadge').classList.toggle('show', !navigator.onLine);
+    return;
+  }
   const lv = n?.warningLevel || 'none';
   const band = $('#band');
   band.dataset.lv = lv;
@@ -1315,13 +1327,15 @@ function renderStatus() {
   const ws = (n?.warnings || []);
   const upd = jstShort(n?.updated);
   const where = n?.region?.name || State.here?.regionName || '';
+  const titlePrefix = State.offline ? '保存時点' : '現在';
+  const dataTime = State.offline ? `保存データ（取得 ${upd}）— 最新情報ではありません` : `更新 ${upd}`;
   if (!ws.length) {
-    $('#bandTitle').textContent = `現在：特別な警報なし`;
-    $('#bandSub').textContent = `${where} — 平常時 ・ 更新 ${upd}`;
+    $('#bandTitle').textContent = `${titlePrefix}：特別な警報なし`;
+    $('#bandSub').textContent = `${where} — 平常時 ・ ${dataTime}`;
   } else {
     const top = ws.slice(0, 3).map(w => w.name + (w.condition ? `（${w.condition}）` : '')).join('・');
-    $('#bandTitle').textContent = top;
-    $('#bandSub').textContent = `${where} ・ ${(ws.length > 3 ? `ほか${ws.length - 3}件` : '')} 更新 ${upd}`;
+    $('#bandTitle').textContent = `${titlePrefix}：${top}`;
+    $('#bandSub').textContent = `${where} ・ ${(ws.length > 3 ? `ほか${ws.length - 3}件 ・ ` : '')}${dataTime}`;
   }
   $('#offlineBadge').classList.toggle('show', !navigator.onLine);
 }
@@ -2143,13 +2157,24 @@ async function chooseRegion(code) {
 
 async function refreshLive() {
   if (!State.here) return;
-  renderLocation();
+  State.now = null;
+  State.offline = false;
+  renderAll();
   try {
     State.now = await fetchNow(State.here.lat, State.here.lon);
-    State.offline = false;
   } catch {
     const snap = nearestSnapshot(State.here.lat, State.here.lon);
-    if (snap) { State.now = snap.now; State.offline = true; toast(`オフラインのため保存済みデータを表示しています（${snap.name}）`); }
+    if (snap) {
+      State.here = {
+        lat: snap.lat, lon: snap.lon, source: 'saved',
+        regionCode: snap.regionCode, regionName: snap.name, pref: snap.pref
+      };
+      State.now = snap.now;
+      State.offline = true;
+      toast(`オフラインのため保存済みデータを表示しています（${snap.name}）`);
+    } else {
+      toast('防災データを取得できませんでした。通信状態を確認してください');
+    }
   }
   renderAll();
   if (rainMapCenter) buildRainMap();
